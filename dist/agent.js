@@ -135,15 +135,16 @@ var messages = [
         Use google search by set a sub-page like 'https://google.com/search?q=search' if applicable. Prefer to use Google for simple queries. If the user provides a direct URL, go to that one. Do not make up links`
   }
 ];
-var runAgent = async (prompt) => {
+var runAgent = async (prompt, options) => {
   console.log("###########################################");
   console.log("# GPT4V-Browsing by Unconventional Coding #");
   console.log("###########################################\n");
   const browser = await import_puppeteer_extra.default.launch({
     // headless: "new",
-    headless: false
+    headless: false,
+    ...options
     // executablePath: '/Applications/Google\ Chrome\ Canary.app/Contents/MacOS/Google\ Chrome\ Canary',
-    // userDataDir: '/Users/jasonzhou/Library/Application\ Support/Google/Chrome\ Canary/Default',
+    // userDataDir: '/Users/<user>/Library/Application\ Support/Google/Chrome\ Canary/Default',
   });
   const page = await browser.newPage();
   await page.setViewport({

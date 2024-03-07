@@ -28,7 +28,143 @@ const messages = [
     }
 ];
 
-const runAgent = async (prompt: string) => {
+
+const highlight_screenshot = async (page, prompt: string, url?: string, goTo = false) => {
+    let elemId;
+
+    // take screen shot of viewport
+    // see if screenshot answers the question
+
+    // if not then scroll down and take another screenshot
+    // see if screenshot answers the question
+
+    // if not then scroll down and take another screenshot
+    // see if screenshot answers the question
+
+    // if at the bottom of the page return
+
+
+
+    // Listen for the 'console' event on the page
+    page.on('console', async (msg) => {
+        const msgArgs = msg.args();
+        for (let i = 0; i < msgArgs.length; ++i) {
+            console.log(await msgArgs[i].jsonValue());
+        }
+    });
+
+    if (goTo) {
+        console.log("Crawling " + url);
+        await page.goto(url, {
+            waitUntil: "domcontentloaded",
+            timeout: timeout,
+        });
+    }
+    await Promise.race([
+        waitForEvent(page, 'load'),
+        sleep(timeout)
+    ]);
+
+    // // Iterate over the words two at a time
+    // for (let i = 0; i < words.length; i += 2) {
+    //     const textToFind = words.slice(i, i + 2).join(' ');
+
+    //     // Use Puppeteer to find elements containing the pair of words
+    //     const elements = await page.$x(`//*[contains(text(), "${textToFind}")]`);
+
+    //     if (elements.length > 0) {
+    //         console.log(`Found element(s) containing "${textToFind}":`, elements.length);
+    //         // You can perform further actions with the found elements here
+    //         elemId = await page.evaluate((el) => el.id, elements[0]);
+    //     } else {
+    //         console.log(`No elements found containing "${textToFind}"`);
+    //     }
+    // }
+
+    // const grantLinks = await page.$$eval('a', links => links.map(link => link)) as NodeListOf<HTMLAnchorElement>;
+    // const grantLinks = await page.$$eval('a', links => links.map(link => link.href));
+    // find link with text
+    // get link element id
+    // const link = await page.evaluate(async (text) => {
+    //     const words = text.split(' ');
+    //     const grantLinks = await document.querySelectorAll('a');
+    //     console.log("Links:", prompt, words, grantLinks);
+    //     for (let l of grantLinks) {
+    //         // if (text.split(' ').some(word => elements[i].innerText.includes(word))) {
+    //         //     return elements[i]?.id;
+    //         // }
+    //         for (let i = 0; i < words.length; i += 2) {
+    //             const textToFind = words?.slice(i, i + 2).join(' ');
+    //             if (l?.textContent.includes(textToFind)) {
+    //                 // if (l?.textContent?.includes(textToFind)) {
+    //                 return l?.id;
+    //             }
+    //         }
+    //     }
+    // }, prompt);
+
+     // Perform the evaluation and wait for it to complete
+     const results = await page.evaluate((prompt) => {
+        const words = prompt.split(' ');
+        const grantLinks = Array.from(document.querySelectorAll('a'));
+        console.log("Links:", prompt, words, grantLinks[0]?.innerText);
+
+        let foundLinks = [];
+        for (let i = 0; i < words.length; i += 2) {
+            const textToFind = words.slice(i, i + 2).join(' ');
+            for (let link of grantLinks) {
+                if (link.innerText.includes(textToFind)) {
+                    foundLinks.push(link.id);
+                }
+            }
+        }
+        // Return the found links or any other result you need
+        return foundLinks;
+    }, prompt);
+
+
+    elemId = results[0].id;
+
+    console.log("Link Id:", elemId, results[0]);
+
+    await highlight_links(page);
+
+    if (!elemId) {
+        // TODO: clip page from element
+        await page.screenshot({
+            // // will capture a 150x100 pixel area starting from the point (50, 100) on the webpage 
+            clip: {
+                x: 50, // X coordinate of the top-left corner of the area
+                y: 100, // Y coordinate of the top-left corner of the area
+                width: 150, // Width of the area to capture
+                height: 100 // Height of the area to capture
+            },
+            path: "screenshot.jpg",
+            quality: 100,
+            // fullPage: true,
+        });
+    } else {
+        // Replace '#elementId' with the selector of the element you want to scroll to
+        await page.waitForSelector(elemId);
+
+        // Scroll to the element
+        await page.evaluate(() => {
+            document.querySelector('#elementId').scrollIntoView();
+        });
+
+        // Optionally, wait for a bit to ensure the page has time to scroll
+        await page.waitForTimeout(1000); // Wait for 1 second
+
+        // const element = await page.$('#unique-element-id');
+        const element = await page.$(elemId);
+        await element.screenshot({
+            path: "screenshot.jpg",
+            quality: 100,
+        });
+    }
+};
+
+const runAgent = async (prompt: string, options?: {}) => {
     console.log("###########################################");
     console.log("# GPT4V-Browsing by Unconventional Coding #");
     console.log("###########################################\n");
@@ -36,8 +172,9 @@ const runAgent = async (prompt: string) => {
     const browser = await puppeteer.launch({
         // headless: "new",
         headless: false,
+        ...options,
         // executablePath: '/Applications/Google\ Chrome\ Canary.app/Contents/MacOS/Google\ Chrome\ Canary',
-        // userDataDir: '/Users/jasonzhou/Library/Application\ Support/Google/Chrome\ Canary/Default',
+        // userDataDir: '/Users/<user>/Library/Application\ Support/Google/Chrome\ Canary/Default',
     });
 
     const page = await browser.newPage();
@@ -48,10 +185,6 @@ const runAgent = async (prompt: string) => {
         deviceScaleFactor: 1,
     });
 
-    // console.log("GPT: How can I assist you today?")
-    // const prompt = await input("You: ");
-    // console.log();
-
     messages.push({
         "role": "user",
         "content": prompt,
@@ -61,24 +194,7 @@ const runAgent = async (prompt: string) => {
 
     while (!agent_done) {
         if (url) {
-            console.log("Crawling " + url);
-            await page.goto(url, {
-                waitUntil: "domcontentloaded",
-                timeout: timeout,
-            });
-
-            await Promise.race([
-                waitForEvent(page, 'load'),
-                sleep(timeout)
-            ]);
-
-            await highlight_links(page);
-
-            await page.screenshot({
-                path: "screenshot.jpg",
-                fullPage: true,
-            });
-
+            await highlight_screenshot(page, prompt, url, true);
             screenshot_taken = true;
             url = null;
         }
@@ -103,23 +219,26 @@ const runAgent = async (prompt: string) => {
             screenshot_taken = false;
         }
 
+        // https://platform.openai.com/account/limits
         const response = await openai.chat.completions.create({
             model: "gpt-4-vision-preview",
             max_tokens: 1024,
+            // max_tokens: 100, //model's response will be limited to 100 tokens.
             messages: messages as any[],
         });
 
         const message = response.choices[0].message;
-        const message_text = message.content;
+        const message_text = message.content.trim();
 
         messages.push({
             "role": "assistant",
             "content": message_text,
         });
 
-        console.log("GPT: " + message_text);
+        // console.log("GPT: " + message_text);
+        console.log(JSON.stringify(messages, null, 2));
 
-        if (message_text.indexOf('{"click": "') !== -1) {
+        if (message_text.includes('click')) {
 
             // let parts = message_text.split('{"click": "');
             // parts = parts[1].split('"}');
@@ -152,19 +271,21 @@ const runAgent = async (prompt: string) => {
                         (exact || partial).click()
                     ]);
 
-                    // Additional checks can be done here, like validating the response or URL
-                    await Promise.race([
-                        waitForEvent(page, 'load'),
-                        sleep(timeout)
-                    ]);
+                    await highlight_screenshot(page, prompt);
 
-                    await highlight_links(page);
+                    // // Additional checks can be done here, like validating the response or URL
+                    // await Promise.race([
+                    //     waitForEvent(page, 'load'),
+                    //     sleep(timeout)
+                    // ]);
 
-                    await page.screenshot({
-                        path: "screenshot.jpg",
-                        quality: 100,
-                        fullPage: true
-                    });
+                    // await highlight_links(page);
+
+                    // await page.screenshot({
+                    //     path: "screenshot.jpg",
+                    //     quality: 100,
+                    //     fullPage: true
+                    // });
 
                     screenshot_taken = true;
                 } else {
@@ -180,7 +301,7 @@ const runAgent = async (prompt: string) => {
             }
 
             continue;
-        } else if (message_text.indexOf('{"url": "') !== -1) {
+        } else if (message_text.includes('url')) {
             // let parts = message_text.split('{"url": "');
             // parts = parts[1].split('"}');
             // url = parts[0];
@@ -197,6 +318,7 @@ const runAgent = async (prompt: string) => {
         //     "content": prompt,
         // });
         agent_done = true;
+        prompt = undefined
     }
 }
 

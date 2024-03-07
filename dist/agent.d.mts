@@ -1,3 +1,3 @@
-declare const runAgent: (prompt: string) => Promise<void>;
+declare const runAgent: (prompt: string, options?: {}) => Promise<void>;
 
 export { runAgent as default };

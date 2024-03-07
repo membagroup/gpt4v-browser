@@ -1,6 +1,7 @@
 import fs from 'fs';
+import readline from 'readline';
 
-async function image_to_base64(image_file) {
+async function  image_to_base64(image_file) {
     return await new Promise((resolve, reject) => {
         fs.readFile(image_file, (err, data) => {
             if (err) {
@@ -16,26 +17,26 @@ async function image_to_base64(image_file) {
     });
 }
 
-// async function input( text ) {
-//     let the_prompt;
+async function input(text: string) {
+    let the_prompt;
 
-//     const rl = readline.createInterface({
-//       input: process.stdin,
-//       output: process.stdout
-//     });
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
 
-//     await (async () => {
-//         return new Promise( resolve => {
-//             rl.question( text, (prompt) => {
-//                 the_prompt = prompt;
-//                 rl.close();
-//                 resolve();
-//             } );
-//         } );
-//     })();
+    await (async () => {
+        return new Promise(resolve => {
+            rl.question(text, (prompt) => {
+                the_prompt = prompt;
+                rl.close();
+                resolve(true);
+            });
+        });
+    })();
 
-//     return the_prompt;
-// }
+    return the_prompt;
+}
 
 async function sleep(milliseconds: number) {
     return await new Promise((r, _) => {
@@ -122,4 +123,4 @@ async function highlight_links(page) {
 }
 
 
-export { image_to_base64, sleep, waitForEvent, highlight_links };
+export { image_to_base64, sleep, waitForEvent, highlight_links, input };

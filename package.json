@@ -6,10 +6,10 @@
   "module": "./dist/agent.mjs",
   "types": "./dist/agent.d.ts",
   "scripts": {
+    "start": "ts-node ./exec.ts",
     "build": "tsup",
     "dev": "tsup --watch",
     "check-types": "tsc --noEmit"
-
   },
   "exports": {
     ".": {
@@ -30,6 +30,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.11.25",
+    "ts-node": "^10.9.2",
     "tsup": "^8.0.2",
     "typescript": "^5.4.2"
   }
