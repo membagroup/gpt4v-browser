@@ -103,6 +103,73 @@ var messages = [
         Use google search by set a sub-page like 'https://google.com/search?q=search' if applicable. Prefer to use Google for simple queries. If the user provides a direct URL, go to that one. Do not make up links`
   }
 ];
+var highlight_screenshot = async (page, prompt, url, goTo = false) => {
+  let elemId;
+  page.on("console", async (msg) => {
+    const msgArgs = msg.args();
+    for (let i = 0; i < msgArgs.length; ++i) {
+      console.log(await msgArgs[i].jsonValue());
+    }
+  });
+  if (goTo) {
+    console.log("Crawling " + url);
+    await page.goto(url, {
+      waitUntil: "domcontentloaded",
+      timeout
+    });
+  }
+  await Promise.race([
+    waitForEvent(page, "load"),
+    sleep(timeout)
+  ]);
+  const results = await page.evaluate((prompt2) => {
+    const words = prompt2.split(" ");
+    const grantLinks = Array.from(document.querySelectorAll("a"));
+    console.log("Links:", prompt2, words, grantLinks[0]?.innerText);
+    let foundLinks = [];
+    for (let i = 0; i < words.length; i += 2) {
+      const textToFind = words.slice(i, i + 2).join(" ");
+      for (let link of grantLinks) {
+        if (link.innerText.includes(textToFind)) {
+          foundLinks.push(link.id);
+        }
+      }
+    }
+    return foundLinks;
+  }, prompt);
+  elemId = results[0].id;
+  console.log("Link Id:", elemId, results[0]);
+  await highlight_links(page);
+  if (!elemId) {
+    await page.screenshot({
+      // // will capture a 150x100 pixel area starting from the point (50, 100) on the webpage 
+      clip: {
+        x: 50,
+        // X coordinate of the top-left corner of the area
+        y: 100,
+        // Y coordinate of the top-left corner of the area
+        width: 150,
+        // Width of the area to capture
+        height: 100
+        // Height of the area to capture
+      },
+      path: "screenshot.jpg",
+      quality: 100
+      // fullPage: true,
+    });
+  } else {
+    await page.waitForSelector(elemId);
+    await page.evaluate(() => {
+      document.querySelector("#elementId").scrollIntoView();
+    });
+    await page.waitForTimeout(1e3);
+    const element = await page.$(elemId);
+    await element.screenshot({
+      path: "screenshot.jpg",
+      quality: 100
+    });
+  }
+};
 var runAgent = async (prompt, options) => {
   console.log("###########################################");
   console.log("# GPT4V-Browsing by Unconventional Coding #");
@@ -127,20 +194,7 @@ var runAgent = async (prompt, options) => {
   let url, screenshot_taken = false, agent_done = false;
   while (!agent_done) {
     if (url) {
-      console.log("Crawling " + url);
-      await page.goto(url, {
-        waitUntil: "domcontentloaded",
-        timeout
-      });
-      await Promise.race([
-        waitForEvent(page, "load"),
-        sleep(timeout)
-      ]);
-      await highlight_links(page);
-      await page.screenshot({
-        path: "screenshot.jpg",
-        fullPage: true
-      });
+      await highlight_screenshot(page, prompt, url, true);
       screenshot_taken = true;
       url = null;
     }
@@ -164,16 +218,17 @@ var runAgent = async (prompt, options) => {
     const response = await openai.chat.completions.create({
       model: "gpt-4-vision-preview",
       max_tokens: 1024,
+      // max_tokens: 100, //model's response will be limited to 100 tokens.
       messages
     });
     const message = response.choices[0].message;
-    const message_text = message.content;
+    const message_text = message.content.trim();
     messages.push({
       "role": "assistant",
       "content": message_text
     });
-    console.log("GPT: " + message_text);
-    if (message_text.indexOf('{"click": "') !== -1) {
+    console.log(JSON.stringify(messages, null, 2));
+    if (message_text.includes("click")) {
       const link_text = JSON.parse(message_text).click;
       console.log("Clicking on " + link_text);
       try {
@@ -193,16 +248,7 @@ var runAgent = async (prompt, options) => {
             page.waitForNavigation({ waitUntil: "domcontentloaded" }).catch((e) => console.log("Navigation timeout/error:", e.message)),
             (exact || partial).click()
           ]);
-          await Promise.race([
-            waitForEvent(page, "load"),
-            sleep(timeout)
-          ]);
-          await highlight_links(page);
-          await page.screenshot({
-            path: "screenshot.jpg",
-            quality: 100,
-            fullPage: true
-          });
+          await highlight_screenshot(page, prompt);
           screenshot_taken = true;
         } else {
           throw new Error("Can't find link");
@@ -216,11 +262,12 @@ var runAgent = async (prompt, options) => {
         });
       }
       continue;
-    } else if (message_text.indexOf('{"url": "') !== -1) {
+    } else if (message_text.includes("url")) {
       url = JSON.parse(message_text).url;
       continue;
     }
     agent_done = true;
+    prompt = void 0;
   }
 };
 var agent_default = runAgent;
