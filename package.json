@@ -2,15 +2,41 @@
   "name": "gpt4v-browser",
   "version": "1.0.0",
   "description": "",
-  "main": "screenshot.js",
+  "main": "./dist/agent.js",
+  "module": "./dist/agent.mjs",
+  "types": "./dist/agent.d.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "ts-node ./exec.ts",
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "check-types": "tsc --noEmit"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "module": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "dotenv": "^16.4.5",
+    "husky": "^9.0.11",
     "openai": "^4.20.1",
     "puppeteer": "^21.5.2",
-    "puppeteer-extra": "^3.3.6"
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.25",
+    "ts-node": "^10.9.2",
+    "tsup": "^8.0.2",
+    "typescript": "^5.4.2"
+  },
+  "lint-staged": {
+    "*.{js,ts}": [
+    ]
   }
 }
