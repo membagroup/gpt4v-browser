@@ -23,6 +23,7 @@
   "license": "ISC",
   "dependencies": {
     "dotenv": "^16.4.5",
+    "husky": "^9.0.11",
     "openai": "^4.20.1",
     "puppeteer": "^21.5.2",
     "puppeteer-extra": "^3.3.6",
@@ -33,5 +34,10 @@
     "ts-node": "^10.9.2",
     "tsup": "^8.0.2",
     "typescript": "^5.4.2"
+  },
+  "lint-staged": {
+    "*.{js,ts}": [
+      "npm run build"
+    ]
   }
 }
