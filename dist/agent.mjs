@@ -81,179 +81,176 @@ async function highlight_links(page) {
     }, e);
   });
 }
+var tryParse = (jsonString) => {
+  try {
+    return JSON.parse(jsonString);
+  } catch (e) {
+    return false;
+  }
+};
+var askAiForAnswer = async (openai2, messages) => {
+  messages = messages?.length <= 4 ? messages : [...messages.slice(0, 2), ...messages.slice(-1)];
+  console.log("Messages:", messages?.length);
+  const response = await openai2.chat.completions.create({
+    model: "gpt-4-vision-preview",
+    max_tokens: 1024,
+    // max_tokens: 100, //model's response will be limited to 100 tokens.
+    messages
+    // G2: send system message and last 2 messages (turns)
+  });
+  const message = response.choices[0].message;
+  const message_text = (message?.content || "").trim();
+  messages.push({
+    "role": "assistant",
+    "content": message_text
+  });
+  return message_text;
+};
 
 // agent.ts
 dotenv.config();
 puppeteer.use(StealthPlugin());
 var openai = new OpenAI();
 var timeout = 5e3;
-var messages = [
-  {
-    "role": "system",
-    "content": `You are a website crawler. You will be given instructions on what to do by browsing. You are connected to a web browser and you will be given the screenshot of the website you are on. The links on the website will be highlighted in red in the screenshot. Always read what is in the screenshot. Don't guess link names.
+var systemMessage = {
+  "role": "system",
+  "content": `You are a website crawler. You will be given instructions on what to do by browsing. You are connected to a web browser and you will be given the screenshot of the website you are on. The links on the website will be highlighted in red in the screenshot. Always read what is in the screenshot. Don't guess link names.
 
-        You can go to a specific URL by answering with the following JSON format:
-        {"url": "url goes here"}
+    You can go to a specific URL by answering with the following JSON format:
+    {"url": "url goes here"}
 
-        You can click links on the website by referencing the text inside of the link/button, by answering in the following JSON format:
-        {"click": "Text in link"}
+    You can click links on the website by referencing the text inside of the link/button, by answering in the following JSON format:
+    {"click": "Text in link"}
 
-        Once you are on a URL and you have found the answer to the user's question, you can answer with a regular message.
+    You can scroll down on the website, by answering in the following JSON format:
+    {"scroll": "down"}
 
-        Use google search by set a sub-page like 'https://google.com/search?q=search' if applicable. Prefer to use Google for simple queries. If the user provides a direct URL, go to that one. Do not make up links`
+    Once you are on a URL and you have found the answer to the user's question, you can answer with a regular message.
+
+    Use google search by set a sub-page like 'https://google.com/search?q=search' if applicable. Prefer to use Google for simple queries. If the user provides a direct URL, go to that one. Do not make up links`
+};
+var resolution = 2;
+var addScreenshotMessage = async (messages) => {
+  const base64_image = await image_to_base64("screenshot.jpg");
+  messages.push({
+    "role": "user",
+    "content": JSON.stringify([
+      {
+        "type": "image_url",
+        "image_url": base64_image
+      },
+      {
+        "type": "text",
+        "text": `Here's the screenshot of the website you are on right now. You can click on links with {"click": "Link text"} or you can crawl to another URL if this one is incorrect. If you find the answer to the user's question, you can respond normally. If you don't find the answer on this portion of the website, you can scroll down and for another screenshot.`
+      }
+    ])
+  });
+};
+var handleProcessUrl = async (aiResponse) => {
+  const resp = tryParse(aiResponse);
+  return resp ? resp?.url : null;
+};
+var handleClickLink = async (page, aiResponse) => {
+  const resp = tryParse(aiResponse);
+  if (resp) {
+    const link = resp.click;
+    console.log("Clicking on " + link);
+    const elements = await page.$$("[gpt-link-text]");
+    let partial, exact;
+    for (const element of elements) {
+      const attributeValue = await element.evaluate((el) => el.getAttribute("gpt-link-text"));
+      if (attributeValue?.includes(link)) {
+        partial = element;
+      }
+      if (attributeValue === link) {
+        exact = element;
+      }
+    }
+    if (exact || partial) {
+      const [response] = await Promise.all([
+        page.waitForNavigation({ waitUntil: "domcontentloaded" }).catch((e) => console.log("Navigation timeout/error:", e.message)),
+        (exact || partial).click()
+      ]);
+    }
   }
-];
-var highlight_screenshot = async (page, prompt, url, goTo = false) => {
-  let elemId;
+  throw new Error("Can't find link");
+};
+var runAgent = async (prompt, options) => {
+  console.log("###########################################");
+  console.log("# GPT4V-Browsing by Unconventional Coding #");
+  console.log("###########################################\n");
+  let currentHeight = 0, previousHeight = 0, scrollFactor = 7, screenShotCounter = 0, scrollCounter = 0;
+  let agentDone = false, messages = [systemMessage];
+  messages.push({
+    "role": "user",
+    "content": prompt
+  });
+  const browser = await puppeteer.launch({
+    headless: "new",
+    // headless: true,
+    ...options
+  });
+  const page = await browser.newPage();
   page.on("console", async (msg) => {
     const msgArgs = msg.args();
     for (let i = 0; i < msgArgs.length; ++i) {
       console.log(await msgArgs[i].jsonValue());
     }
   });
-  if (goTo) {
-    console.log("Crawling " + url);
-    await page.goto(url, {
-      waitUntil: "domcontentloaded",
-      timeout
+  await page.setViewport({ width: 1200, height: 1200, deviceScaleFactor: resolution });
+  let oldLayout;
+  while (!agentDone) {
+    const currentLayout = await page.evaluate(() => {
+      return {
+        top: window.screenTop,
+        left: window.screenLeft,
+        windowH: window.innerHeight,
+        windowW: window.innerWidth,
+        totalH: document.body.scrollHeight
+      };
     });
-  }
-  await Promise.race([
-    waitForEvent(page, "load"),
-    sleep(timeout)
-  ]);
-  const results = await page.evaluate((prompt2) => {
-    const words = prompt2.split(" ");
-    const grantLinks = Array.from(document.querySelectorAll("a"));
-    console.log("Links:", prompt2, words, grantLinks[0]?.innerText);
-    let foundLinks = [];
-    for (let i = 0; i < words.length; i += 2) {
-      const textToFind = words.slice(i, i + 2).join(" ");
-      for (let link of grantLinks) {
-        if (link.innerText.includes(textToFind)) {
-          foundLinks.push(link.id);
+    console.log("Current URL:", page.url());
+    const totalHeight = await page.evaluate(() => document.body.scrollHeight);
+    const aiResponse = await askAiForAnswer(openai, messages);
+    console.log("AI Response:", aiResponse);
+    if (aiResponse.includes("scroll")) {
+      if (screenShotCounter === scrollFactor) {
+        screenShotCounter = 0;
+        scrollCounter++;
+        previousHeight = currentHeight;
+        await page.evaluate(() => window.scrollBy(0, window.innerHeight));
+        await page.waitForTimeout(1e3);
+        currentHeight = await page.evaluate((scrollFactor2) => window.scrollY + window.innerHeight / scrollFactor2, scrollFactor);
+        if (currentHeight >= totalHeight) {
+          agentDone = true;
         }
       }
     }
-    return foundLinks;
-  }, prompt);
-  elemId = results[0].id;
-  console.log("Link Id:", elemId, results[0]);
-  await highlight_links(page);
-  if (!elemId) {
-    await page.screenshot({
-      // // will capture a 150x100 pixel area starting from the point (50, 100) on the webpage 
-      clip: {
-        x: 50,
-        // X coordinate of the top-left corner of the area
-        y: 100,
-        // Y coordinate of the top-left corner of the area
-        width: 150,
-        // Width of the area to capture
-        height: 100
-        // Height of the area to capture
-      },
-      path: "screenshot.jpg",
-      quality: 100
-      // fullPage: true,
-    });
-  } else {
-    await page.waitForSelector(elemId);
-    await page.evaluate(() => {
-      document.querySelector("#elementId").scrollIntoView();
-    });
-    await page.waitForTimeout(1e3);
-    const element = await page.$(elemId);
-    await element.screenshot({
-      path: "screenshot.jpg",
-      quality: 100
-    });
-  }
-};
-var runAgent = async (prompt, options) => {
-  console.log("###########################################");
-  console.log("# GPT4V-Browsing by Unconventional Coding #");
-  console.log("###########################################\n");
-  const browser = await puppeteer.launch({
-    // headless: "new",
-    headless: false,
-    ...options
-    // executablePath: '/Applications/Google\ Chrome\ Canary.app/Contents/MacOS/Google\ Chrome\ Canary',
-    // userDataDir: '/Users/<user>/Library/Application\ Support/Google/Chrome\ Canary/Default',
-  });
-  const page = await browser.newPage();
-  await page.setViewport({
-    width: 1200,
-    height: 1200,
-    deviceScaleFactor: 1
-  });
-  messages.push({
-    "role": "user",
-    "content": prompt
-  });
-  let url, screenshot_taken = false, agent_done = false;
-  while (!agent_done) {
-    if (url) {
-      await highlight_screenshot(page, prompt, url, true);
-      screenshot_taken = true;
-      url = null;
+    if (aiResponse.includes("url")) {
+      oldLayout = null;
+      previousHeight = 0, currentHeight = 0;
+      const url = await handleProcessUrl(aiResponse);
+      if (url) {
+        console.log("Going to " + url);
+        await page.goto(url, {
+          waitUntil: "domcontentloaded",
+          timeout
+        });
+        await Promise.race([
+          waitForEvent(page, "load"),
+          sleep(timeout)
+        ]);
+      } else {
+        agentDone = true;
+      }
     }
-    if (screenshot_taken) {
-      const base64_image = await image_to_base64("screenshot.jpg");
-      messages.push({
-        "role": "user",
-        "content": JSON.stringify([
-          {
-            "type": "image_url",
-            "image_url": base64_image
-          },
-          {
-            "type": "text",
-            "text": `Here's the screenshot of the website you are on right now. You can click on links with {"click": "Link text"} or you can crawl to another URL if this one is incorrect. If you find the answer to the user's question, you can respond normally.`
-          }
-        ])
-      });
-      screenshot_taken = false;
-    }
-    const response = await openai.chat.completions.create({
-      model: "gpt-4-vision-preview",
-      max_tokens: 1024,
-      // max_tokens: 100, //model's response will be limited to 100 tokens.
-      messages
-    });
-    const message = response.choices[0].message;
-    const message_text = message.content.trim();
-    messages.push({
-      "role": "assistant",
-      "content": message_text
-    });
-    console.log(JSON.stringify(messages, null, 2));
-    if (message_text.includes("click")) {
-      const link_text = JSON.parse(message_text).click;
-      console.log("Clicking on " + link_text);
+    if (aiResponse.includes("click")) {
+      oldLayout = null;
+      previousHeight = 0, currentHeight = 0;
       try {
-        const elements = await page.$$("[gpt-link-text]");
-        let partial, exact;
-        for (const element of elements) {
-          const attributeValue = await element.evaluate((el) => el.getAttribute("gpt-link-text"));
-          if (attributeValue.includes(link_text)) {
-            partial = element;
-          }
-          if (attributeValue === link_text) {
-            exact = element;
-          }
-        }
-        if (exact || partial) {
-          const [response2] = await Promise.all([
-            page.waitForNavigation({ waitUntil: "domcontentloaded" }).catch((e) => console.log("Navigation timeout/error:", e.message)),
-            (exact || partial).click()
-          ]);
-          await highlight_screenshot(page, prompt);
-          screenshot_taken = true;
-        } else {
-          throw new Error("Can't find link");
-        }
+        await handleClickLink(page, aiResponse);
       } catch (error) {
+        agentDone = true;
         console.log("ERROR: Clicking failed", error);
         messages.push({
           "role": "assistant",
@@ -261,13 +258,43 @@ var runAgent = async (prompt, options) => {
           "content": "ERROR: I was unable to click that element"
         });
       }
-      continue;
-    } else if (message_text.includes("url")) {
-      url = JSON.parse(message_text).url;
+    }
+    if (agentDone) {
+      messages.push({
+        "role": "assistant",
+        //"user"
+        "content": "ERROR: I was unable to find the answer to your question. Please try asking again or rephrasing your question."
+      });
       continue;
     }
-    agent_done = true;
-    prompt = void 0;
+    if (currentHeight == 0) {
+      await highlight_links(page);
+    }
+    const screenshotH = currentLayout?.windowH / scrollFactor;
+    const clip = {
+      // // will capture a 150x100 pixel area starting from the point (50, 100) on the webpage 
+      top: currentLayout?.top,
+      // X coordinate of the top-left corner of the area
+      left: oldLayout ? oldLayout?.left + screenshotH : currentLayout?.left,
+      // Y coordinate of the top-left corner of the area
+      width: currentLayout?.windowW,
+      // Width of the area to capture
+      height: screenshotH
+      // Height of the area to capture
+    };
+    console.log(`Taking screenshot at`, clip);
+    console.log(`scrollCounter:${scrollCounter}, screenShotCounter:${screenShotCounter}`);
+    await page.screenshot({
+      clip: { ...clip, x: clip?.top, y: clip?.left },
+      path: "screenshot.jpg",
+      quality: 100
+      // fullPage: true,
+    });
+    await addScreenshotMessage(messages);
+    screenShotCounter++;
+    if (screenShotCounter !== scrollFactor) {
+      oldLayout = clip;
+    }
   }
 };
 var agent_default = runAgent;

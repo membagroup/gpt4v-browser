@@ -1,7 +1,8 @@
 import fs from 'fs';
+import OpenAI from 'openai';
 import readline from 'readline';
 
-async function  image_to_base64(image_file) {
+async function image_to_base64(image_file) {
     return await new Promise((resolve, reject) => {
         fs.readFile(image_file, (err, data) => {
             if (err) {
@@ -23,7 +24,7 @@ async function input(text: string) {
     const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout
-    });
+    } as any);
 
     await (async () => {
         return new Promise(resolve => {
@@ -122,5 +123,37 @@ async function highlight_links(page) {
     });
 }
 
+const tryParse = (jsonString: string): Record<string, any> | false => {
+    try {
+        return JSON.parse(jsonString);
+    } catch (e) {
+        return false;
+    }
+}
 
-export { image_to_base64, sleep, waitForEvent, highlight_links, input };
+const askAiForAnswer = async (openai: OpenAI, messages: any[]) => {
+    messages = messages?.length <= 4 ? messages : [...messages.slice(0, 2), ...messages.slice(-1)] as any[];
+    console.log("Messages:", messages?.length);
+
+    // https://platform.openai.com/account/limits
+    const response = await openai.chat.completions.create({
+        model: "gpt-4-vision-preview",
+        max_tokens: 1024,
+        // max_tokens: 100, //model's response will be limited to 100 tokens.
+        messages  // G2: send system message and last 2 messages (turns)
+    });
+
+    const message = response.choices[0].message;
+    const message_text = (message?.content || '').trim();
+
+    messages.push({
+        "role": "assistant",
+        "content": message_text,
+    });
+
+    return message_text;
+}
+
+
+
+export { image_to_base64, sleep, waitForEvent, highlight_links, input, tryParse, askAiForAnswer };

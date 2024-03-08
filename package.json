@@ -6,10 +6,12 @@
   "module": "./dist/agent.mjs",
   "types": "./dist/agent.d.ts",
   "scripts": {
-    "start": "ts-node ./exec.ts",
+    "start": "ts-node exec.ts",
     "build": "tsup",
     "dev": "tsup --watch",
-    "check-types": "tsc --noEmit"
+    "check-types": "tsc --noEmit",
+    "shot": "node screenshot.js",
+    "eval": "ts-node eval.ts"
   },
   "exports": {
     ".": {

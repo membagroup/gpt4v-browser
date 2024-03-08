@@ -6,9 +6,14 @@ puppeteer.use(StealthPlugin());
 const url = process.argv[2];
 const timeout = 5000;
 
+if (!url) {
+    console.error("URL is required");
+    process.exit(1);
+}
+
 (async () => {
     const browser = await puppeteer.launch({
-        headless: "new",        
+        headless: "new",
         // args: [
         //     "--no-sandbox",
         //     "--disable-setuid-sandbox",
@@ -32,7 +37,7 @@ const timeout = 5000;
         //     "--no-first-run",
         //     "--single-process",
         // ],
-        // executablePath: '/Applications/Google\ Chrome\ Canary.app/Contents/MacOS/Google\ Chrome\ Canary',
+        executablePath: '/Applications/Google\ Chrome\ Canary.app/Contents/MacOS/Google\ Chrome\ Canary',
         // userDataDir: '/Users/<user>/Library/Application\ Support/Google/Chrome\ Canary/Default',
     });
 
@@ -41,7 +46,9 @@ const timeout = 5000;
     await page.setViewport({
         width: 1200,
         height: 1200,
-        deviceScaleFactor: 1,
+        // https://github.com/puppeteer/puppeteer/issues/1329#issuecomment-343088916
+        // https://github.com/puppeteer/puppeteer/issues/571
+        deviceScaleFactor: 2,
     });
 
     await page.goto(url, {
@@ -49,11 +56,33 @@ const timeout = 5000;
         timeout: timeout,
     });
 
-    await page.waitForTimeout(timeout);
+    await page.waitForTimeout(timeout*2);
+
+    await page.waitForNavigation({ waitUntil: 'domcontentloaded' })
+        .catch(e => console.log("Navigation timeout/error:", e.message));
+
+    const size = await page.evaluate(() => {
+        return {
+            top: window.screenTop, left: window.screenLeft,
+            windowH: window.innerHeight, windowW: window.innerWidth,
+            totalH: document.body.scrollHeight
+        };
+    });
+
+    const factor = 7;
+    const factorH = size?.windowH / factor;
 
     await page.screenshot({
+        clip: {
+            x: size?.top, // X coordinate of the top-left corner of the area
+            y: 1221, //size?.left, // Y coordinate of the top-left corner of the area
+            width: size?.windowW, // Width of the area to capture
+            height: factorH, // Height of the area to capture
+        },
         path: "screenshot.jpg",
-        fullPage: true,
+        type: "jpeg",
+        quality: 100,
+        // fullPage: true,
     });
 
     await browser.close();
